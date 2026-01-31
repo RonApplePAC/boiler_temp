@@ -1,0 +1,113 @@
+esphome:
+  name: boiler-temp
+  friendly_name: Boiler Temperature
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot in case wifi connection fails
+  ap:
+    ssid: "Boiler-Temp Fallback"
+    password: !secret fallback_password
+
+captive_portal:
+
+# Dallas 1-Wire bus
+one_wire:
+  - platform: gpio
+    pin: GPIO4  # Change this to your data pin
+
+# DS18B20 Temperature Sensor
+sensor:
+  - platform: dallas_temp
+    address: 0x0000000000000000  # Replace with your sensor's address
+    name: "Boiler Water Temperature"
+    id: boiler_temp
+    update_interval: 30s
+    accuracy_decimals: 1
+    unit_of_measurement: "°F"
+    filters:
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 1
+      # Convert Celsius to Fahrenheit (DS18B20 outputs Celsius)
+      - lambda: return x * 9.0 / 5.0 + 32.0;
+
+  # Import outside temperature from Home Assistant (Met.no)
+  - platform: homeassistant
+    name: "Outside Temperature"
+    id: outside_temp
+    entity_id: weather.forecast_home  # Update this to match your Met.no entity
+    attribute: temperature
+    unit_of_measurement: "°F"
+
+# Temperature alerts
+binary_sensor:
+  # Alert: Boiler too cold
+  - platform: template
+    name: "Boiler Temperature Low"
+    device_class: problem
+    lambda: |-
+      if (!id(boiler_temp).has_state() || !id(outside_temp).has_state()) {
+        return false;
+      }
+      float outside = id(outside_temp).state;
+      float boiler = id(boiler_temp).state;
+
+      if (outside < 50.0) {
+        return boiler < 120.0;  // Cold weather: alert below 120°F
+      } else {
+        return boiler < 100.0;  // Warm weather: alert below 100°F
+      }
+
+  # Alert: Boiler too hot
+  - platform: template
+    name: "Boiler Temperature High"
+    device_class: problem
+    lambda: |-
+      if (!id(boiler_temp).has_state() || !id(outside_temp).has_state()) {
+        return false;
+      }
+      float outside = id(outside_temp).state;
+      float boiler = id(boiler_temp).state;
+
+      if (outside < 50.0) {
+        return boiler > 190.0;  // Cold weather: alert above 190°F
+      } else {
+        return boiler > 170.0;  // Warm weather: alert above 170°F
+      }
+
+  # Combined alert for easy automation
+  - platform: template
+    name: "Boiler Temperature Alert"
+    device_class: problem
+    lambda: |-
+      if (!id(boiler_temp).has_state() || !id(outside_temp).has_state()) {
+        return false;
+      }
+      float outside = id(outside_temp).state;
+      float boiler = id(boiler_temp).state;
+
+      if (outside < 50.0) {
+        return (boiler < 120.0) || (boiler > 190.0);
+      } else {
+        return (boiler < 100.0) || (boiler > 170.0);
+      }

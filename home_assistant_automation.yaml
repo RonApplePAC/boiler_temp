@@ -1,0 +1,64 @@
+# Boiler Temperature Alert Automations
+# Add these to your Home Assistant automations.yaml
+# Or paste into the automation editor via UI
+
+- alias: "Boiler Temperature Low Alert"
+  id: boiler_temp_low_alert
+  description: "Notify when boiler temperature drops below threshold"
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.boiler_temperature_low
+      to: "on"
+  condition: []
+  action:
+    - service: notify.mobile_app_YOUR_PHONE  # Change to your device
+      data:
+        title: "Boiler Alert: Temperature Low"
+        message: >
+          Boiler temp is {{ states('sensor.boiler_water_temperature') }}°F.
+          Outside temp is {{ state_attr('weather.forecast_home', 'temperature') }}°F.
+        data:
+          priority: high
+          ttl: 0
+          tag: boiler-alert
+  mode: single
+
+- alias: "Boiler Temperature High Alert"
+  id: boiler_temp_high_alert
+  description: "Notify when boiler temperature exceeds threshold"
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.boiler_temperature_high
+      to: "on"
+  condition: []
+  action:
+    - service: notify.mobile_app_YOUR_PHONE  # Change to your device
+      data:
+        title: "Boiler Alert: Temperature High"
+        message: >
+          Boiler temp is {{ states('sensor.boiler_water_temperature') }}°F.
+          Outside temp is {{ state_attr('weather.forecast_home', 'temperature') }}°F.
+        data:
+          priority: high
+          ttl: 0
+          tag: boiler-alert
+  mode: single
+
+- alias: "Boiler Temperature Back to Normal"
+  id: boiler_temp_normal
+  description: "Notify when boiler temperature returns to normal"
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.boiler_temperature_alert
+      from: "on"
+      to: "off"
+  condition: []
+  action:
+    - service: notify.mobile_app_YOUR_PHONE  # Change to your device
+      data:
+        title: "Boiler: Back to Normal"
+        message: >
+          Boiler temp is {{ states('sensor.boiler_water_temperature') }}°F.
+        data:
+          tag: boiler-alert
+  mode: single
