@@ -53,9 +53,15 @@ app (phone) and to Telegram through the Hermes watcher `boiler_watch.py`. Pause 
 reminders with the **Pause alerts** button on the notification or by turning on
 `input_boolean.boiler_alerts_paused`. The pause clears itself when the boiler returns to normal.
 
-The thresholds apply to wherever the probe is mounted. A probe strapped to a basement pipe reads lower
-than the boiler's own gauge, and a branch that only circulates on a call for heat will cool when idle.
-Mount it on a line that stays hot while the boiler is running.
+The thresholds apply to wherever the probe is mounted. The loop circulates constantly (the system has no
+antifreeze, so the water is kept moving), which means a basement pipe stays close to boiler temperature
+whether or not the house is calling for heat. A probe strapped to the outside of a pipe still reads a
+little lower than the water, so insulate over it.
+
+**Freeze risk:** the loop is plain water. If the fire dies or the circulation pump stops in winter the
+water can freeze and split the boiler and buried lines, so treat the low alert as freeze protection.
+Power the node from a generator-backed circuit, because a power outage is exactly when the circulator
+stops and the hub would otherwise go dark with it.
 
 ## Installation
 
