@@ -3,8 +3,8 @@
 ESPHome node for a Seeed XIAO ESP32-C3 (external antenna) that reports to Home Assistant:
 
 - Boiler / circulating water temperature (DS18B20 probe on the boiler water pipe)
-- Basement temperature and humidity (AHT21 on the combo board)
-- Basement air quality: ENS160 (AQI, TVOC, estimated eCO2) and CCS811 (second opinion)
+- Basement temperature and humidity (AHT21 on the ENS160+AHT21 board)
+- Basement air quality: ENS160 (AQI, TVOC, estimated eCO2)
 - Fixed boiler alerts: **low below 140°F, high above 190°F**
 
 > The air-quality sensors estimate eCO2/TVOC. They are NOT a carbon monoxide detector.
@@ -15,7 +15,7 @@ ESPHome node for a Seeed XIAO ESP32-C3 (external antenna) that reports to Home A
 - Seeed Studio XIAO ESP32-C3 with the external u.FL antenna attached (attach before power-up)
 - DS18B20 waterproof temperature probe
 - 4.7kΩ resistor (1-Wire pull-up)
-- CCS811 + ENS160 + AHT21 combo board (I2C)
+- ENS160 + AHT21 breakout board (I2C). Pins printed on the board: INT CS ADD SDA SCL GND 3V3 VIN
 - Jumper wires
 
 ## Wiring
@@ -28,17 +28,18 @@ Black   ───────────────► GND
 Yellow  ───────────────► D2 (GPIO4)
         └──[4.7kΩ]─────► 3V3   (pull-up between data and 3V3)
 
-Combo board (I2C)        XIAO ESP32-C3
-─────────────────        ─────────────
-VCC     ───────────────► 3V3
+ENS160+AHT21 board       XIAO ESP32-C3
+───────────────────      ─────────────
+3V3     ───────────────► 3V3
 GND     ───────────────► GND
 SDA     ───────────────► D4 (GPIO6)
 SCL     ───────────────► D5 (GPIO7)
+VIN, INT, CS, ADD        leave unconnected (see notes)
 ```
 
 A second DS18B20 can later share the same three wires (probe red/black/yellow in parallel).
 When two probes are present, give each an explicit `address:` and a unique name in `basement_hub.yaml`.
-Mount the combo board away from the hot pipe or its temperature reading will be high.
+Mount the air-quality board away from the hot pipe or its temperature reading will be high.
 
 ## Alerts
 
@@ -68,7 +69,7 @@ stops and the hub would otherwise go dark with it.
 1. **ESPHome:** add a new device, replace its contents with `basement_hub.yaml`, add the secrets
    (`wifi_ssid`, `wifi_password`, `api_encryption_key`, `ota_password`, `fallback_password`).
 2. **First flash over USB**, then watch the log: confirm the I2C scan finds 0x38 (AHT21),
-   0x52 or 0x53 (ENS160), 0x5A or 0x5B (CCS811), and that the DS18B20 reports a temperature.
+   and 0x52 or 0x53 (ENS160), and that the DS18B20 reports a temperature.
    If an address differs from the config, change `address:` in `basement_hub.yaml`.
 3. **Check the entity IDs** in Home Assistant (Developer Tools > States, search `basement_`).
    The automations and watcher assume `sensor.basement_boiler_water_temperature` and

@@ -6,7 +6,8 @@
 #                              4.7k ohm resistor between data (GPIO4) and 3V3
 #                              (extra DS18B20 probes can share the same three wires later)
 #   I2C bus:  SDA -> D4 / GPIO6,  SCL -> D5 / GPIO7,  VCC -> 3V3,  GND -> GND
-#       CCS811 + ENS160 + AHT21 combo board
+#       ENS160 + AHT21 breakout (pins printed on the board: INT CS ADD SDA SCL GND 3V3 VIN)
+#       board 3V3 -> XIAO 3V3, GND -> GND; leave VIN, INT, CS, ADD unconnected at first
 #   Attach the u.FL antenna BEFORE powering the board.
 #
 # Entity IDs in Home Assistant are built from the device friendly_name ("Basement") + entity name,
@@ -56,7 +57,7 @@ one_wire:
 i2c:
   sda: GPIO6
   scl: GPIO7
-  scan: true   # check the log on first boot: expect 0x38 (AHT21), 0x52/0x53 (ENS160), 0x5A/0x5B (CCS811)
+  scan: true   # check the log on first boot: expect 0x38 (AHT21) and 0x52 or 0x53 (ENS160)
 
 sensor:
   # DS18B20 boiler water probe. With a single probe on the bus no address is needed.
@@ -74,7 +75,7 @@ sensor:
       # Convert Celsius to Fahrenheit (DS18B20 outputs Celsius)
       - lambda: return x * 9.0 / 5.0 + 32.0;
 
-  # AHT21 temperature / humidity (on the combo board; AHT21 uses the AHT20 driver)
+  # AHT21 temperature / humidity (on the ENS160+AHT21 board; AHT21 uses the AHT20 driver)
   - platform: aht10
     variant: AHT20
     temperature:
@@ -111,15 +112,6 @@ sensor:
     compensation:
       temperature: basement_temp_c
       humidity: basement_humidity
-    update_interval: 60s
-
-  # CCS811 second opinion on eCO2 / TVOC (older chip, can be flaky; remove if it misbehaves)
-  - platform: ccs811
-    address: 0x5A   # if the I2C scan shows 0x5B instead, change this
-    eco2:
-      name: "Basement eCO2 (CCS811)"
-    tvoc:
-      name: "Basement TVOC (CCS811)"
     update_interval: 60s
 
   - platform: wifi_signal
