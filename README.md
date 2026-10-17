@@ -5,7 +5,7 @@ ESP32-based boiler water temperature monitor with Home Assistant integration and
 ## Features
 
 - Real-time boiler water temperature monitoring
-- Weather-based alert thresholds (adjusts based on outside temperature)
+- Fixed alert thresholds: low below 140°F, high above 190°F
 - Push notifications via Home Assistant Companion App
 - ESPHome integration for easy Home Assistant setup
 
@@ -30,17 +30,18 @@ Yellow ────────► GPIO4
 
 ## Alert Thresholds
 
-| Outside Temp | Low Alert | High Alert |
-|--------------|-----------|------------|
-| Below 50°F   | < 120°F   | > 190°F    |
-| 50°F+        | < 100°F   | > 170°F    |
+| Alert | Threshold |
+|-------|-----------|
+| Low   | below 140°F |
+| High  | above 190°F |
+
+Thresholds are fixed and do not depend on outside temperature.
 
 ## Installation
 
 ### 1. Prerequisites
 
 - Home Assistant with ESPHome add-on installed
-- Met.no weather integration in Home Assistant
 - Home Assistant Companion App on your phone
 
 ### 2. ESPHome Setup
@@ -78,13 +79,7 @@ Generate an API key at: https://esphome.io/components/api.html
 3. Edit your config and replace `0x0000000000000000` with your sensor's address
 4. Re-flash wirelessly via **Install** → **Wirelessly**
 
-### 6. Verify Met.no Entity
-
-1. In Home Assistant, go to **Developer Tools** → **States**
-2. Search for `weather.`
-3. Update the `entity_id` in boiler_temp.yaml if different from `weather.forecast_home`
-
-### 7. Set Up Notifications
+### 6. Set Up Notifications
 
 1. Find your phone's notify service:
    - Go to **Developer Tools** → **Services**
