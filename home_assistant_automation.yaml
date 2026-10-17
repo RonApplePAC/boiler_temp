@@ -1,64 +1,149 @@
 # Boiler Temperature Alert Automations
-# Add these to your Home Assistant automations.yaml
-# Or paste into the automation editor via UI
+# Paste into Home Assistant (Settings > Automations > + Create > Edit in YAML), one block at a time.
+#
+# PREREQUISITE: create a Toggle helper named "Boiler alerts paused"
+#   (Settings > Devices & services > Helpers > Create helper > Toggle)
+#   It must end up as entity  input_boolean.boiler_alerts_paused
+#
+# Behaviour:
+#  - LOW  : fires after the ESPHome device has seen < 140F for 10 minutes, then REPEATS HOURLY
+#           until the boiler recovers or you press "Pause alerts" on the notification
+#           (or turn on the helper). Pause clears itself when the boiler returns to normal.
+#  - HIGH : fires once, after > 190F for 1 minute.
+#  - OFFLINE: no reading from the probe/device for 10 minutes.
+# Telegram ("Jonah") messages come from ~/.hermes/scripts/boiler_watch.py on the Hermes server,
+# which watches the same entities. These automations are the Home Assistant app push.
+# NOTE: entity ids assume ESPHome device friendly_name 'Basement'. Verify in Developer Tools > States after first flash.
+# Change the notify target if the alerts should go to a different phone.
 
-- alias: "Boiler Temperature Low Alert"
+- alias: "Boiler Low Alert (repeats hourly until paused)"
   id: boiler_temp_low_alert
-  description: "Notify when boiler temperature drops below threshold"
+  description: "Low boiler temp: notify, then repeat every hour until recovered or paused"
+  mode: single
   trigger:
     - platform: state
-      entity_id: binary_sensor.boiler_temperature_low
+      entity_id: binary_sensor.basement_boiler_temperature_low
       to: "on"
-  condition: []
+  condition:
+    - condition: state
+      entity_id: input_boolean.boiler_alerts_paused
+      state: "off"
   action:
-    - service: notify.mobile_app_YOUR_PHONE  # Change to your device
-      data:
-        title: "Boiler Alert: Temperature Low"
-        message: >
-          Boiler temp is {{ states('sensor.boiler_water_temperature') }}°F.
-          Outside temp is {{ state_attr('weather.forecast_home', 'temperature') }}°F.
-        data:
-          priority: high
-          ttl: 0
-          tag: boiler-alert
-  mode: single
+    - repeat:
+        sequence:
+          - service: notify.mobile_app_ronalds_iphone
+            data:
+              title: "Boiler Alert: Temperature LOW"
+              message: >
+                Boiler water is {{ states('sensor.basement_boiler_water_temperature') }}°F
+                (alert below 140°F). Repeats hourly until recovered or paused.
+              data:
+                tag: boiler-low
+                ttl: 0
+                priority: high
+                push:
+                  interruption-level: time-sensitive
+                actions:
+                  - action: BOILER_PAUSE
+                    title: "Pause alerts"
+          - wait_for_trigger:
+              - platform: state
+                entity_id: binary_sensor.basement_boiler_temperature_low
+                to: "off"
+              - platform: state
+                entity_id: input_boolean.boiler_alerts_paused
+                to: "on"
+            timeout: "01:00:00"
+            continue_on_timeout: true
+        until:
+          - condition: or
+            conditions:
+              - condition: state
+                entity_id: binary_sensor.basement_boiler_temperature_low
+                state: "off"
+              - condition: state
+                entity_id: input_boolean.boiler_alerts_paused
+                state: "on"
 
-- alias: "Boiler Temperature High Alert"
+- alias: "Boiler High Alert"
   id: boiler_temp_high_alert
-  description: "Notify when boiler temperature exceeds threshold"
-  trigger:
-    - platform: state
-      entity_id: binary_sensor.boiler_temperature_high
-      to: "on"
-  condition: []
-  action:
-    - service: notify.mobile_app_YOUR_PHONE  # Change to your device
-      data:
-        title: "Boiler Alert: Temperature High"
-        message: >
-          Boiler temp is {{ states('sensor.boiler_water_temperature') }}°F.
-          Outside temp is {{ state_attr('weather.forecast_home', 'temperature') }}°F.
-        data:
-          priority: high
-          ttl: 0
-          tag: boiler-alert
+  description: "High boiler temp: notify once"
   mode: single
-
-- alias: "Boiler Temperature Back to Normal"
-  id: boiler_temp_normal
-  description: "Notify when boiler temperature returns to normal"
   trigger:
     - platform: state
-      entity_id: binary_sensor.boiler_temperature_alert
+      entity_id: binary_sensor.basement_boiler_temperature_high
+      to: "on"
+  action:
+    - service: notify.mobile_app_ronalds_iphone
+      data:
+        title: "Boiler Alert: Temperature HIGH"
+        message: "Boiler water is {{ states('sensor.basement_boiler_water_temperature') }}°F (alert above 190°F)."
+        data:
+          tag: boiler-high
+          ttl: 0
+          priority: high
+          push:
+            interruption-level: time-sensitive
+
+- alias: "Boiler Alerts - Pause button"
+  id: boiler_temp_pause_action
+  description: "Handle the 'Pause alerts' button on the low-temp notification"
+  mode: single
+  trigger:
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: BOILER_PAUSE
+  action:
+    - service: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.boiler_alerts_paused
+    - service: notify.mobile_app_ronalds_iphone
+      data:
+        title: "Boiler alerts paused"
+        message: "Repeat alerts are paused. They re-arm automatically when the boiler returns to normal."
+        data:
+          tag: boiler-low
+
+- alias: "Boiler Back to Normal (and re-arm)"
+  id: boiler_temp_normal
+  description: "Alert cleared: notify and clear the pause so the next problem alerts again"
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.basement_boiler_temperature_alert
       from: "on"
       to: "off"
-  condition: []
   action:
-    - service: notify.mobile_app_YOUR_PHONE  # Change to your device
+    - service: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.boiler_alerts_paused
+    - service: notify.mobile_app_ronalds_iphone
       data:
         title: "Boiler: Back to Normal"
-        message: >
-          Boiler temp is {{ states('sensor.boiler_water_temperature') }}°F.
+        message: "Boiler water is {{ states('sensor.basement_boiler_water_temperature') }}°F."
         data:
-          tag: boiler-alert
+          tag: boiler-low
+
+- alias: "Boiler Sensor Offline"
+  id: boiler_temp_offline
+  description: "No temperature reading from the boiler device for 10 minutes"
   mode: single
+  trigger:
+    - platform: state
+      entity_id: sensor.basement_boiler_water_temperature
+      to:
+        - "unavailable"
+        - "unknown"
+      for: "00:10:00"
+  action:
+    - service: notify.mobile_app_ronalds_iphone
+      data:
+        title: "Boiler sensor OFFLINE"
+        message: "No boiler temperature reading for 10 minutes. Check the probe wiring / device power / WiFi. Boiler is NOT being monitored."
+        data:
+          tag: boiler-offline
+          ttl: 0
+          priority: high
+          push:
+            interruption-level: time-sensitive

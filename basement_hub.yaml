@@ -1,0 +1,186 @@
+# Basement Hub: boiler water temperature + basement climate + air quality
+# Board: Seeed Studio XIAO ESP32-C3 with external u.FL antenna (basement WiFi)
+#
+# Wiring (XIAO ESP32-C3):
+#   DS18B20 waterproof probe   red -> 3V3, black -> GND, yellow(data) -> D2 / GPIO4
+#                              4.7k ohm resistor between data (GPIO4) and 3V3
+#                              (extra DS18B20 probes can share the same three wires later)
+#   I2C bus:  SDA -> D4 / GPIO6,  SCL -> D5 / GPIO7,  VCC -> 3V3,  GND -> GND
+#       CCS811 + ENS160 + AHT21 combo board
+#   Attach the u.FL antenna BEFORE powering the board.
+#
+# Entity IDs in Home Assistant are built from the device friendly_name ("Basement") + entity name,
+# e.g. sensor.basement_boiler_water_temperature. Verify after first flash (see README).
+
+esphome:
+  name: basement-hub
+  friendly_name: Basement
+
+esp32:
+  board: seeed_xiao_esp32c3
+  framework:
+    type: arduino
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # Fallback hotspot in case WiFi connection fails
+  ap:
+    ssid: "Basement-Hub Fallback"
+    password: !secret fallback_password
+
+captive_portal:
+
+# Onboard user LED on the XIAO ESP32-C3 is GPIO10, active low
+status_led:
+  pin:
+    number: GPIO10
+    inverted: true
+
+# ---- Dallas 1-Wire bus (boiler water probe) ----
+one_wire:
+  - platform: gpio
+    pin: GPIO4
+
+# ---- I2C bus (climate + air quality) ----
+i2c:
+  sda: GPIO6
+  scl: GPIO7
+  scan: true   # check the log on first boot: expect 0x38 (AHT21), 0x52/0x53 (ENS160), 0x5A/0x5B (CCS811)
+
+sensor:
+  # DS18B20 boiler water probe. With a single probe on the bus no address is needed.
+  # When a second probe is added, give each an explicit address (find them in the log) and a unique name.
+  - platform: dallas_temp
+    name: "Boiler Water Temperature"
+    id: boiler_temp
+    update_interval: 30s
+    accuracy_decimals: 1
+    unit_of_measurement: "°F"
+    filters:
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 1
+      # Convert Celsius to Fahrenheit (DS18B20 outputs Celsius)
+      - lambda: return x * 9.0 / 5.0 + 32.0;
+
+  # AHT21 temperature / humidity (on the combo board; AHT21 uses the AHT20 driver)
+  - platform: aht10
+    variant: AHT20
+    temperature:
+      name: "Basement Temperature"
+      id: basement_temp
+      unit_of_measurement: "°F"
+      accuracy_decimals: 1
+      filters:
+        - lambda: return x * 9.0 / 5.0 + 32.0;
+    humidity:
+      name: "Basement Humidity"
+      id: basement_humidity
+    update_interval: 60s
+
+  # Celsius copy of the basement temperature for ENS160 compensation (internal, not shown in HA)
+  - platform: template
+    id: basement_temp_c
+    internal: true
+    unit_of_measurement: "°C"
+    lambda: |-
+      if (!id(basement_temp).has_state()) return {};
+      return (id(basement_temp).state - 32.0) * 5.0 / 9.0;
+    update_interval: 60s
+
+  # ENS160 air quality (uses the AHT21 readings for compensation)
+  - platform: ens160_i2c
+    address: 0x53   # if the I2C scan shows 0x52 instead, change this
+    eco2:
+      name: "Basement eCO2 (estimated)"
+    tvoc:
+      name: "Basement TVOC"
+    aqi:
+      name: "Basement Air Quality Index"
+    compensation:
+      temperature: basement_temp_c
+      humidity: basement_humidity
+    update_interval: 60s
+
+  # CCS811 second opinion on eCO2 / TVOC (older chip, can be flaky; remove if it misbehaves)
+  - platform: ccs811
+    address: 0x5A   # if the I2C scan shows 0x5B instead, change this
+    eco2:
+      name: "Basement eCO2 (CCS811)"
+    tvoc:
+      name: "Basement TVOC (CCS811)"
+    update_interval: 60s
+
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 60s
+
+  - platform: uptime
+    name: "Uptime"
+    update_interval: 60s
+
+# ---- Boiler temperature alerts ----
+# Fixed thresholds, independent of outside temperature.
+#   Low:  below 140°F, must persist 10 minutes (ignores cold start / brief dips)
+#   High: above 190°F, must persist 1 minute (ignores one-off sensor glitches)
+binary_sensor:
+  - platform: template
+    name: "Boiler Temperature Low"
+    id: boiler_low
+    device_class: problem
+    lambda: |-
+      if (!id(boiler_temp).has_state()) {
+        return false;
+      }
+      return id(boiler_temp).state < 140.0;
+    filters:
+      - delayed_on: 10min
+      - delayed_off: 30s
+
+  - platform: template
+    name: "Boiler Temperature High"
+    id: boiler_high
+    device_class: problem
+    lambda: |-
+      if (!id(boiler_temp).has_state()) {
+        return false;
+      }
+      return id(boiler_temp).state > 190.0;
+    filters:
+      - delayed_on: 1min
+      - delayed_off: 30s
+
+  # Combined alert (on when either delayed alert is on)
+  - platform: template
+    name: "Boiler Temperature Alert"
+    id: boiler_alert
+    device_class: problem
+    lambda: |-
+      return id(boiler_low).state || id(boiler_high).state;
+
+  - platform: status
+    name: "Connected"
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+
+button:
+  - platform: restart
+    name: "Restart"
+
+# Flood / leak sensors: not installed yet. When leak probes are bought, add a gpio binary_sensor
+# (device_class: moisture) on a free pin, e.g. GPIO5 (D3) or GPIO3 (D1). Do not configure an
+# input pin with nothing connected: a floating pin gives false flood alerts.

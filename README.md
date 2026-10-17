@@ -1,119 +1,83 @@
-# Boiler Temperature Monitor
+# Basement Hub (boiler water temperature + basement climate + air quality)
 
-ESP32-based boiler water temperature monitor with Home Assistant integration and smart alerts.
+ESPHome node for a Seeed XIAO ESP32-C3 (external antenna) that reports to Home Assistant:
 
-## Features
+- Boiler / circulating water temperature (DS18B20 probe on the boiler water pipe)
+- Basement temperature and humidity (AHT21 on the combo board)
+- Basement air quality: ENS160 (AQI, TVOC, estimated eCO2) and CCS811 (second opinion)
+- Fixed boiler alerts: **low below 140°F, high above 190°F**
 
-- Real-time boiler water temperature monitoring
-- Fixed alert thresholds: low below 140°F, high above 190°F
-- Push notifications via Home Assistant Companion App
-- ESPHome integration for easy Home Assistant setup
+> The air-quality sensors estimate eCO2/TVOC. They are NOT a carbon monoxide detector.
+> Keep real CO alarms in the basement and near the bedrooms.
 
-## Hardware Required
+## Hardware
 
-- ESP32-C3 SuperMini dev board
-- DS18B20 waterproof temperature sensor
-- 4.7kΩ resistor (pull-up for 1-Wire bus)
+- Seeed Studio XIAO ESP32-C3 with the external u.FL antenna attached (attach before power-up)
+- DS18B20 waterproof temperature probe
+- 4.7kΩ resistor (1-Wire pull-up)
+- CCS811 + ENS160 + AHT21 combo board (I2C)
 - Jumper wires
 
-## Wiring Diagram
+## Wiring
 
 ```
-DS18B20          ESP32-C3 SuperMini
-───────          ──────────────────
-Red    ────────► 3.3V
-Black  ────────► GND
-Yellow ────────► GPIO4
-       │
-       └──[4.7kΩ]──► 3.3V  (pull-up resistor)
+DS18B20 probe            XIAO ESP32-C3
+─────────────            ─────────────
+Red     ───────────────► 3V3
+Black   ───────────────► GND
+Yellow  ───────────────► D2 (GPIO4)
+        └──[4.7kΩ]─────► 3V3   (pull-up between data and 3V3)
+
+Combo board (I2C)        XIAO ESP32-C3
+─────────────────        ─────────────
+VCC     ───────────────► 3V3
+GND     ───────────────► GND
+SDA     ───────────────► D4 (GPIO6)
+SCL     ───────────────► D5 (GPIO7)
 ```
 
-## Alert Thresholds
+A second DS18B20 can later share the same three wires (probe red/black/yellow in parallel).
+When two probes are present, give each an explicit `address:` and a unique name in `basement_hub.yaml`.
+Mount the combo board away from the hot pipe or its temperature reading will be high.
 
-| Alert | Threshold |
-|-------|-----------|
-| Low   | below 140°F |
-| High  | above 190°F |
+## Alerts
 
-Thresholds are fixed and do not depend on outside temperature.
+| Alert | Threshold | Must persist | Notification |
+|-------|-----------|--------------|--------------|
+| Low   | below 140°F | 10 minutes (ignores cold start) | Repeats **hourly** until recovered or paused |
+| High  | above 190°F | 1 minute (ignores glitches) | Once |
+| Offline | no reading | 10 minutes | Once |
+
+Thresholds are fixed and do not depend on outside temperature. Each alert goes to the Home Assistant
+app (phone) and to Telegram through the Hermes watcher `boiler_watch.py`. Pause the hourly low-temp
+reminders with the **Pause alerts** button on the notification or by turning on
+`input_boolean.boiler_alerts_paused`. The pause clears itself when the boiler returns to normal.
+
+The thresholds apply to wherever the probe is mounted. A probe strapped to a basement pipe reads lower
+than the boiler's own gauge, and a branch that only circulates on a call for heat will cool when idle.
+Mount it on a line that stays hot while the boiler is running.
 
 ## Installation
 
-### 1. Prerequisites
-
-- Home Assistant with ESPHome add-on installed
-- Home Assistant Companion App on your phone
-
-### 2. ESPHome Setup
-
-1. Open ESPHome from the Home Assistant sidebar
-2. Click **+ New Device** → name it `boiler-temp` → select **ESP32-C3**
-3. Click **Edit** on the new device
-4. Replace the contents with `boiler_temp.yaml` from this repo
-5. Click **Secrets** and add your credentials (see secrets.yaml for template)
-
-### 3. Configure Secrets
-
-Add these to ESPHome secrets:
-
-```yaml
-wifi_ssid: "YourWiFiName"
-wifi_password: "YourWiFiPassword"
-api_encryption_key: "your-32-byte-base64-key"
-ota_password: "your-ota-password"
-fallback_password: "your-fallback-password"
-```
-
-Generate an API key at: https://esphome.io/components/api.html
-
-### 4. First Flash (USB)
-
-1. Connect ESP32-C3 to your computer via USB
-2. In ESPHome, click 3 dots → **Install** → **Plug into this computer**
-3. Select the serial port and wait for flashing to complete
-
-### 5. Get Sensor Address
-
-1. After flashing, click **Logs** in ESPHome
-2. Find the line: `Found sensors: 0x1234567890ABCDEF`
-3. Edit your config and replace `0x0000000000000000` with your sensor's address
-4. Re-flash wirelessly via **Install** → **Wirelessly**
-
-### 6. Set Up Notifications
-
-1. Find your phone's notify service:
-   - Go to **Developer Tools** → **Services**
-   - Search for `notify.mobile_app`
-   - Note your device name (e.g., `notify.mobile_app_johns_iphone`)
-
-2. Edit `home_assistant_automation.yaml`:
-   - Replace `notify.mobile_app_YOUR_PHONE` with your device name
-
-3. Add automations to Home Assistant:
-   - Go to **Settings** → **Automations** → **+ Create Automation**
-   - Click 3 dots → **Edit in YAML**
-   - Paste each automation block from `home_assistant_automation.yaml`
+1. **ESPHome:** add a new device, replace its contents with `basement_hub.yaml`, add the secrets
+   (`wifi_ssid`, `wifi_password`, `api_encryption_key`, `ota_password`, `fallback_password`).
+2. **First flash over USB**, then watch the log: confirm the I2C scan finds 0x38 (AHT21),
+   0x52 or 0x53 (ENS160), 0x5A or 0x5B (CCS811), and that the DS18B20 reports a temperature.
+   If an address differs from the config, change `address:` in `basement_hub.yaml`.
+3. **Check the entity IDs** in Home Assistant (Developer Tools > States, search `basement_`).
+   The automations and watcher assume `sensor.basement_boiler_water_temperature` and
+   `binary_sensor.basement_boiler_temperature_low` / `_high` / `_alert`. Fix them if they differ.
+4. **Create a Toggle helper** named "Boiler alerts paused" (`input_boolean.boiler_alerts_paused`).
+5. **Notifications:** adjust the `notify.mobile_app_...` target in `home_assistant_automation.yaml`
+   and paste each automation into Home Assistant (Settings > Automations > Edit in YAML).
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `boiler_temp.yaml` | ESPHome device configuration |
-| `secrets.yaml` | Template for credentials (do not commit with real values) |
-| `home_assistant_automation.yaml` | Home Assistant notification automations |
-
-## Customization
-
-### Change GPIO Pin
-
-Edit `boiler_temp.yaml` line 35:
-```yaml
-pin: GPIO4  # Change to your data pin
-```
-
-### Adjust Temperature Thresholds
-
-Edit the binary_sensor lambda functions in `boiler_temp.yaml` to change the alert thresholds.
+| `basement_hub.yaml` | ESPHome device configuration |
+| `home_assistant_automation.yaml` | Home Assistant phone notifications (low repeats hourly, pause button, offline) |
+| `secrets.yaml` | NOT in the repo; supply your own credentials |
 
 ## License
 
